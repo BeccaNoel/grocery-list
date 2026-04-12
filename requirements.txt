@@ -1,0 +1,13 @@
+# Core runtime dependencies pinned for reproducible installs.
+# Install from this file instead of unpinned package names.
+
+requests==2.33.1
+python-dotenv==1.2.2
+schedule==1.2.2
+opencv-python==4.13.0.92
+mediapipe==0.10.33
+
+# Optional desktop notifications.
+# Not installed by default because it is less actively maintained than the core stack.
+# notifier.py already degrades gracefully when plyer is absent.
+# plyer==2.1.0
