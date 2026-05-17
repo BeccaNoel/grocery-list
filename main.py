@@ -176,12 +176,17 @@ def verify_skylight(settings: Settings) -> None:
     try:
         authenticate(settings)
     except SkylightError as exc:
-        raise StartupError("Unable to authenticate with Skylight") from exc
+        raise StartupError(f"Unable to authenticate with Skylight: {exc}") from exc
 
     log_action(
         "Skylight connectivity verified",
         action="skylight_healthcheck_success",
-        metadata={"frame_id": settings.skylight_frame_id, "list_id": settings.skylight_list_id},
+        metadata={
+            "backend": settings.skylight_backend,
+            "frame_id": settings.skylight_frame_id,
+            "list_id": settings.skylight_list_id,
+            "list_name": settings.skylight_list_name,
+        },
     )
     update_connection("skylight_auth", "healthy")
     update_connection("skylight_api", "healthy")
@@ -191,6 +196,7 @@ def print_startup_summary(settings: Settings, mode: str) -> None:
     summary = (
         "Startup summary\n"
         f"  Mode: {mode}\n"
+        f"  Skylight backend: {settings.skylight_backend}\n"
         f"  Camera source: {settings.camera_source}\n"
         f"  Scan interval (hours): {settings.scan_interval_hours}\n"
         f"  Staples count: {len(settings.staples)}\n"
@@ -203,6 +209,7 @@ def print_startup_summary(settings: Settings, mode: str) -> None:
         action="startup_summary",
         metadata={
             "mode": mode,
+            "skylight_backend": settings.skylight_backend,
             "camera_source": str(settings.camera_source),
             "scan_interval_hours": settings.scan_interval_hours,
             "staples_count": len(settings.staples),

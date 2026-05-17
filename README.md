@@ -37,9 +37,10 @@ The project also includes a local administrator interface for monitoring camera,
 ## Requirements
 
 - Python 3.11+
+- Node.js 18+ when `SKYLIGHT_BACKEND=mcp`
 - Local Ollama instance with the configured LLaVA model available
 - A working camera source
-- Skylight credentials and IDs
+- Skylight credentials and frame ID
 
 ## Installation
 
@@ -60,15 +61,15 @@ python -m pip install plyer==2.1.0
 
 ## Configuration
 
-Create a `.env` file in the repository root.
+Copy `.env.example` to `.env` in the repository root and fill in your real values.
 
-Example:
+Template:
 
 ```env
 SKYLIGHT_EMAIL=your_email@example.com
 SKYLIGHT_PASSWORD=your_password
 SKYLIGHT_FRAME_ID=your_frame_id
-SKYLIGHT_LIST_ID=your_grocery_list_id
+SKYLIGHT_BACKEND=mcp
 CAMERA_INDEX=rtsp://user:pass@camera-ip:554/Preview_01_sub
 DOOR_OPEN_DETECTION_ENABLED=true
 DOOR_OPEN_SAMPLE_FPS=5
@@ -93,6 +94,33 @@ ADMIN_UI_PORT=8765
 ```
 
 `CAMERA_INDEX` can be either a numeric webcam index such as `0` or an RTSP URL.
+
+`SKYLIGHT_FRAME_ID` must be the Skylight household/frame identifier taken from a real API path such as `/api/frames/{frameId}/chores`. A profile name or account nickname will return `404 Not Found` through the MCP backend.
+
+Skylight backend options:
+
+- `SKYLIGHT_BACKEND=mcp`: runs the Skylight integration through the `@eaglebyte/skylight-mcp` server. Requires Node.js 18+ and uses the default grocery list unless `SKYLIGHT_LIST_NAME` is provided.
+- `SKYLIGHT_BACKEND=api`: uses the legacy direct HTTP client and still requires `SKYLIGHT_LIST_ID`.
+
+Default MCP runtime settings used by this app:
+
+```env
+SKYLIGHT_MCP_COMMAND=npx
+SKYLIGHT_MCP_ARGS=-y @eaglebyte/skylight-mcp
+SKYLIGHT_MCP_TIMEOUT_SECONDS=20
+```
+
+If the local source build at `vendor/skylight-mcp/dist/index.js` exists, the app prefers that runtime automatically because it contains the working OAuth-based login flow. Explicit `SKYLIGHT_MCP_COMMAND` and `SKYLIGHT_MCP_ARGS` environment overrides still take precedence.
+
+To rebuild that vendored MCP checkout:
+
+```bash
+cd vendor/skylight-mcp
+npm install
+npm run build
+```
+
+The vendored checkout is currently based on the upstream Skylight MCP auth fix from PR #39, which works with Skylight's current OAuth login flow. The published npm package can still fail with the legacy `/api/sessions` login path.
 
 ## Reolink E1 Pro Notes
 
@@ -156,7 +184,7 @@ On startup, the application will:
 - validate required environment variables
 - verify `.env` ignore protection
 - check Ollama availability and model presence
-- authenticate with Skylight
+- authenticate with the configured Skylight backend
 - start the admin UI
 - print a startup summary and the admin UI URL
 
@@ -204,6 +232,18 @@ Log Viewer
 - Supports filtering by severity.
 - Supports filtering by module name.
 - Supports free-text search across log messages and metadata.
+
+## Skylight MCP Notes
+
+When `SKYLIGHT_BACKEND=mcp`, the app starts the Skylight MCP server over stdio and uses MCP list tools for:
+
+- authentication and frame validation
+- reading grocery items
+- adding grocery items
+
+Current limitation:
+
+- The published Skylight MCP list tools do not expose item IDs in the read path, so this app cannot safely implement full `clear_list()` over MCP alone. Gesture-mode clear-list requests will report an incomplete clear instead of deleting items blindly.
 
 ### Admin UI Actions
 

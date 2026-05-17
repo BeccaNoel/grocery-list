@@ -8,3 +8,5 @@ __pycache__/
 .DS_Store
 logs/
 frames/
+.tmp_skylight_mcp/
+vendor/skylight-mcp/node_modules/

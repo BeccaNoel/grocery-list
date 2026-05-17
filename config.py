@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_FILE = BASE_DIR / ".env"
+LOCAL_SKYLIGHT_MCP_DIST = BASE_DIR / "vendor" / "skylight-mcp" / "dist" / "index.js"
 
 DEFAULT_STAPLES = [
     "fairlife milk",
@@ -58,10 +60,18 @@ class ConfigError(ValueError):
 
 @dataclass(frozen=True)
 class Settings:
-    skylight_email: str
-    skylight_password: str
+    skylight_backend: str
+    skylight_email: str | None
+    skylight_password: str | None
     skylight_frame_id: str
-    skylight_list_id: str
+    skylight_list_id: str | None
+    skylight_list_name: str | None
+    skylight_token: str | None
+    skylight_auth_type: str
+    skylight_timezone: str
+    skylight_mcp_command: str
+    skylight_mcp_args: list[str]
+    skylight_mcp_timeout_seconds: int
     camera_index: str
     ollama_host: str
     ollama_model: str
@@ -99,11 +109,22 @@ class Settings:
 def load_settings(dotenv_path: Path | None = None) -> Settings:
     load_dotenv(dotenv_path or ENV_FILE)
 
+    skylight_backend = _get_choice_env("SKYLIGHT_BACKEND", "api", {"api", "mcp"})
+    default_mcp_command, default_mcp_args = _get_default_mcp_runtime()
+
     return Settings(
-        skylight_email=_get_required_env("SKYLIGHT_EMAIL"),
-        skylight_password=_get_required_env("SKYLIGHT_PASSWORD"),
+        skylight_backend=skylight_backend,
+        skylight_email=_get_optional_env("SKYLIGHT_EMAIL"),
+        skylight_password=_get_optional_env("SKYLIGHT_PASSWORD"),
         skylight_frame_id=_get_required_env("SKYLIGHT_FRAME_ID"),
-        skylight_list_id=_get_required_env("SKYLIGHT_LIST_ID"),
+        skylight_list_id=_get_optional_env("SKYLIGHT_LIST_ID"),
+        skylight_list_name=_get_optional_env("SKYLIGHT_LIST_NAME"),
+        skylight_token=_get_optional_env("SKYLIGHT_TOKEN"),
+        skylight_auth_type=_get_choice_env("SKYLIGHT_AUTH_TYPE", "bearer", {"bearer", "basic"}),
+        skylight_timezone=os.getenv("SKYLIGHT_TIMEZONE", "America/New_York").strip() or "America/New_York",
+        skylight_mcp_command=os.getenv("SKYLIGHT_MCP_COMMAND", default_mcp_command).strip() or default_mcp_command,
+        skylight_mcp_args=_get_command_args_env("SKYLIGHT_MCP_ARGS", default_mcp_args),
+        skylight_mcp_timeout_seconds=_get_int_env("SKYLIGHT_MCP_TIMEOUT_SECONDS", 20, minimum=1),
         camera_index=os.getenv("CAMERA_INDEX", "0"),
         ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/"),
         ollama_model=os.getenv("OLLAMA_MODEL", "llava"),
@@ -135,16 +156,28 @@ def load_settings(dotenv_path: Path | None = None) -> Settings:
 def validate_required_env(dotenv_path: Path | None = None) -> list[str]:
     load_dotenv(dotenv_path or ENV_FILE)
 
+    backend = _get_choice_env("SKYLIGHT_BACKEND", "api", {"api", "mcp"})
+
     missing = []
-    for key in (
-        "SKYLIGHT_EMAIL",
-        "SKYLIGHT_PASSWORD",
-        "SKYLIGHT_FRAME_ID",
-        "SKYLIGHT_LIST_ID",
-    ):
+    required_keys = ["SKYLIGHT_FRAME_ID"]
+    if backend == "api":
+        required_keys.extend(["SKYLIGHT_EMAIL", "SKYLIGHT_PASSWORD", "SKYLIGHT_LIST_ID"])
+    else:
+        has_email_auth = bool(os.getenv("SKYLIGHT_EMAIL", "").strip()) and bool(os.getenv("SKYLIGHT_PASSWORD", "").strip())
+        has_token_auth = bool(os.getenv("SKYLIGHT_TOKEN", "").strip())
+        if not has_email_auth and not has_token_auth:
+            missing.extend(["SKYLIGHT_EMAIL/SKYLIGHT_PASSWORD or SKYLIGHT_TOKEN"])
+
+    for key in required_keys:
         if not os.getenv(key, "").strip():
             missing.append(key)
     return missing
+
+
+def _get_default_mcp_runtime() -> tuple[str, list[str]]:
+    if LOCAL_SKYLIGHT_MCP_DIST.is_file():
+        return "node", [str(LOCAL_SKYLIGHT_MCP_DIST)]
+    return "npx", ["-y", "@eaglebyte/skylight-mcp"]
 
 
 def _get_required_env(name: str) -> str:
@@ -152,6 +185,14 @@ def _get_required_env(name: str) -> str:
     if not value:
         raise ConfigError(f"Missing required environment variable: {name}")
     return value
+
+
+def _get_optional_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _get_int_env(name: str, default: int, minimum: int | None = None) -> int:
@@ -195,6 +236,34 @@ def _get_bool_env(name: str, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ConfigError(f"Environment variable {name} must be a boolean")
+
+
+def _get_choice_env(name: str, default: str, allowed_values: set[str]) -> str:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        value = default
+    else:
+        value = raw_value.strip().lower()
+
+    if value not in allowed_values:
+        allowed = ", ".join(sorted(allowed_values))
+        raise ConfigError(f"Environment variable {name} must be one of: {allowed}")
+    return value
+
+
+def _get_command_args_env(name: str, default: list[str]) -> list[str]:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return list(default)
+
+    try:
+        args = shlex.split(raw_value)
+    except ValueError as exc:
+        raise ConfigError(f"Environment variable {name} contains invalid shell-style arguments") from exc
+
+    if not args:
+        raise ConfigError(f"Environment variable {name} must contain at least one argument when provided")
+    return args
 
 
 def _get_staples() -> list[str]:
